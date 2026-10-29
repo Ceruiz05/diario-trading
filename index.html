@@ -36,7 +36,10 @@
   </header>
 
   <nav class="filtros">
-    <div id="f-cuentas" class="segmento" role="group" aria-label="Cuentas"></div>
+    <label class="selector">
+      <span class="sr">Cuenta</span>
+      <select id="f-cuentas" aria-label="Cuenta"></select>
+    </label>
     <div id="f-periodo" class="segmento" role="group" aria-label="Periodo"></div>
   </nav>
   <p id="filtro-dia" class="chip-dia" hidden></p>
@@ -45,7 +48,7 @@
     <section id="kpis" class="kpis"></section>
 
     <section>
-      <h2>Cuentas Apex activas</h2>
+      <h2 id="titulo-cuentas">Cuentas Apex activas</h2>
       <div id="cuentas" class="cuentas"></div>
     </section>
 

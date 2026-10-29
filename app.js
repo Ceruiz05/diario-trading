@@ -308,12 +308,13 @@ function boton(txt, activo, fn) {
 
 function renderFiltros() {
   const fc = $('#f-cuentas'), fp = $('#f-periodo');
-  fc.replaceChildren();
   fp.replaceChildren();
   const set = (k, v) => () => { S[k] = v; S.dia = null; S.abierto = null; render(); };
-  fc.append(boton('Activas', S.cuentas === 'activas', set('cuentas', 'activas')));
-  S.d.activas.forEach((c) => fc.append(boton(c.alias, S.cuentas === c.id, set('cuentas', c.id))));
-  fc.append(boton('Historial', S.cuentas === 'historial', set('cuentas', 'historial')));
+  const op = (v, t) => `<option value="${esc(v)}"${S.cuentas === v ? ' selected' : ''}>${esc(t)}</option>`;
+  const cerradas = S.d.cuentas.filter((c) => c.estado !== 'activa');
+  fc.innerHTML =
+    `<optgroup label="Cuentas activas">${op('activas', 'Todas las activas')}${S.d.activas.map((c) => op(c.id, c.alias + ' · ' + c.id)).join('')}</optgroup>` +
+    `<optgroup label="Historial">${op('historial', 'Todas las cuentas')}${cerradas.map((c) => op(c.id, c.alias + ' · ' + c.id)).join('')}</optgroup>`;
   [['hoy', 'Hoy'], ['semana', 'Semana'], ['mes', 'Mes'], ['todo', 'Todo']].forEach(([k, t]) =>
     fp.append(boton(t, S.periodo === k && !S.dia, set('periodo', k))));
   const chip = $('#filtro-dia');
@@ -349,9 +350,13 @@ function renderKpis(ts) {
 
 function renderCuentas() {
   const cont = $('#cuentas');
-  if (!S.d.activas.length) { cont.innerHTML = '<p class="muted">No hay cuentas marcadas como activas.</p>'; return; }
+  const ids = new Set(cuentasSeleccionadas());
+  const lista = S.cuentas === 'historial' ? S.d.activas : S.d.cuentas.filter((c) => ids.has(c.id));
+  const unaCerrada = lista.length === 1 && lista[0].estado !== 'activa';
+  $('#titulo-cuentas').textContent = unaCerrada ? 'Cuenta (cerrada)' : lista.length === 1 ? 'Cuenta' : 'Cuentas Apex activas';
+  if (!lista.length) { cont.innerHTML = '<p class="muted">No hay cuentas marcadas como activas.</p>'; return; }
   const lim = S.d.consistencia;
-  cont.innerHTML = S.d.activas.map((c) => {
+  cont.innerHTML = lista.map((c) => {
     const e = estadoCuenta(c);
     const uso = Math.max(0, Math.min(1, e.colchon / c.drawdown));
     const colorBarra = uso > 0.5 ? 'var(--gana-mark)' : uso > 0.25 ? 'var(--aviso)' : 'var(--pierde-mark)';
@@ -361,7 +366,7 @@ function renderCuentas() {
     else if (e.ratio <= lim) cons = `<span class="gana">✓ ${pct(e.ratio)}</span>`;
     else cons = `<span class="aviso">⚠ ${pct(e.ratio)}</span>`;
     return `<div class="cuenta">
-      <div class="cuenta-head"><span class="nombre"><i class="punto" style="background:var(${c.color})"></i>${esc(c.alias)}</span>
+      <div class="cuenta-head"><span class="nombre"><i class="punto" style="background:${c.color ? `var(${c.color})` : 'var(--muted)'}"></i>${esc(c.alias)}</span>
         <span class="muted small">${esc(c.tipo)} ${fmtEnt.format(c.tamano / 1000)}K</span></div>
       <div class="saldo">$${fmtNum.format(e.saldo)}</div>
       <div class="small ${clase(e.ganancia)}">${usd(e.ganancia)} desde el inicio</div>
@@ -370,8 +375,8 @@ function renderCuentas() {
         <div><span>Umbral de liquidación${e.congelado ? ' (fijo)' : ''}</span><span>$${fmtNum.format(e.umbral)}</span></div>
         <div><span>Colchón disponible</span><span>${usd(e.colchon, false)} ${estadoColchon}</span></div>
         <div class="barra" title="Colchón respecto al drawdown de ${usd0(c.drawdown)}"><i style="width:${uso * 100}%;background:${colorBarra}"></i></div>
-        <div><span>Consistencia (mejor día ÷ total, máx ${pct(lim)})</span><span>${cons}</span></div>
-        <div><span>Mejor día · total</span><span>${usd0(e.mejor)} · ${usd0(e.total)}</span></div>
+        ${c.tipo === 'PA' ? `<div><span>Consistencia (mejor día ÷ total, máx ${pct(lim)})</span><span>${cons}</span></div>
+        <div><span>Mejor día · total</span><span>${usd0(e.mejor)} · ${usd0(e.total)}</span></div>` : ''}
         <div><span>Días operados</span><span>${e.nDias}</span></div>
       </div>
     </div>`;
@@ -568,6 +573,16 @@ function moverMes(delta) {
   S.mes = f.toISOString().slice(0, 7);
   renderCalendario();
 }
+$('#f-cuentas').addEventListener('change', (e) => {
+  S.cuentas = e.target.value;
+  S.dia = null;
+  S.abierto = null;
+  // El calendario salta al último mes con operaciones de la selección.
+  const ids = new Set(cuentasSeleccionadas());
+  const ult = S.d.trades.filter((t) => ids.has(t.c)).pop();
+  if (ult) S.mes = ult.dia.slice(0, 7);
+  render();
+});
 $('#mes-ant').addEventListener('click', () => moverMes(-1));
 $('#mes-sig').addEventListener('click', () => moverMes(1));
 
