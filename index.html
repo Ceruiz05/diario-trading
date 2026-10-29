@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Diario de Trading</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0b0b'/%3E%3Cpath d='M6 22l6-7 5 4 9-11' stroke='%23fcfcfb' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="candado" class="candado" hidden>
+  <form id="form-clave" class="candado-caja">
+    <h1>Diario de trading</h1>
+    <p class="muted">Ingresa tu contraseña para ver los datos.</p>
+    <input id="clave" type="password" autocomplete="current-password" placeholder="Contraseña" required>
+    <label class="check"><input id="recordar" type="checkbox" checked> Recordar en este dispositivo</label>
+    <button type="submit">Entrar</button>
+    <p id="error-clave" class="error" hidden></p>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header class="top">
+    <div>
+      <h1>Diario de trading</h1>
+      <p id="actualizado" class="muted small"></p>
+    </div>
+    <div class="top-acciones">
+      <button id="btn-tema" class="icono" title="Cambiar tema" aria-label="Cambiar tema"></button>
+      <button id="btn-salir" class="icono" title="Bloquear" aria-label="Bloquear">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <nav class="filtros">
+    <div id="f-cuentas" class="segmento" role="group" aria-label="Cuentas"></div>
+    <div id="f-periodo" class="segmento" role="group" aria-label="Periodo"></div>
+  </nav>
+  <p id="filtro-dia" class="chip-dia" hidden></p>
+
+  <main>
+    <section id="kpis" class="kpis"></section>
+
+    <section>
+      <h2>Cuentas Apex activas</h2>
+      <div id="cuentas" class="cuentas"></div>
+    </section>
+
+    <section>
+      <div class="titulo-fila">
+        <h2>Curva de equity</h2>
+        <div id="leyenda-equity" class="leyenda"></div>
+      </div>
+      <div id="equity" class="grafico"></div>
+    </section>
+
+    <section>
+      <div class="titulo-fila">
+        <h2>Calendario</h2>
+        <div class="mes-nav">
+          <button id="mes-ant" class="icono" aria-label="Mes anterior">‹</button>
+          <span id="mes-titulo"></span>
+          <button id="mes-sig" class="icono" aria-label="Mes siguiente">›</button>
+        </div>
+      </div>
+      <div id="calendario" class="calendario"></div>
+    </section>
+
+    <section>
+      <h2>Disciplina</h2>
+      <div id="disciplina" class="disciplina"></div>
+    </section>
+
+    <section class="dos-col">
+      <div>
+        <h2>Por hora de entrada <span class="muted small">(hora Colombia)</span></h2>
+        <div id="por-hora" class="grafico"></div>
+      </div>
+      <div>
+        <h2>Por día de la semana</h2>
+        <div id="por-dia" class="grafico"></div>
+      </div>
+    </section>
+
+    <section class="dos-col">
+      <div>
+        <h2>Long vs short</h2>
+        <div id="por-lado"></div>
+      </div>
+      <div>
+        <h2>Por duración del trade</h2>
+        <div id="por-duracion"></div>
+      </div>
+    </section>
+
+    <section id="sec-trades">
+      <div class="titulo-fila">
+        <h2>Trades <span id="n-trades" class="muted small"></span></h2>
+        <p class="muted small">Toca un trade para ver el detalle</p>
+      </div>
+      <div class="tabla-scroll">
+        <table id="trades" class="tabla"></table>
+      </div>
+    </section>
+
+    <footer class="muted small">
+      Saldos y drawdown son estimados a partir de NinjaTrader; la referencia oficial es el panel de Apex.
+      Comisiones estimadas. MFE/MAE: lo máximo que el trade fue a favor / en contra.
+    </footer>
+  </main>
+</div>
+
+<div id="tooltip" class="tooltip" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

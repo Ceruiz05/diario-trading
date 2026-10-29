@@ -1,0 +1,4 @@
+# Configuración local: contraseña y ajustes. Nunca se sube.
+local/
+.claude/
+__pycache__/
