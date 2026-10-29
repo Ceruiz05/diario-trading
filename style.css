@@ -222,3 +222,8 @@ footer { margin-top: 36px; border-top: 1px solid var(--borde); padding-top: 12px
 .vacio-msg { color: var(--muted); padding: 24px; text-align: center; }
 
 @media (max-width: 720px) { .disciplina { grid-template-columns: 1fr; } }
+
+/* Escalera de un trade */
+.escalera { margin: 6px 0 4px; max-width: 640px; background: var(--card); border: 1px solid var(--borde); border-radius: 8px; }
+.escalera td, .escalera th { padding: 5px 10px; }
+.escalera tr:last-child td { border-bottom: 0; }

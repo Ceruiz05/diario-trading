@@ -134,23 +134,45 @@ def armar_trades(ejecuciones, stops, comisiones):
     def nuevo(cuenta, inst, sym, pv, t, lado):
         return {"cuenta": cuenta, "inst": inst, "sym": sym, "pv": pv, "dir": lado, "t0": t,
                 "pos": 0, "costo": 0.0, "maxpos": 0, "qe": 0, "ve": 0.0, "qs": 0, "vs": 0.0, "bruto": 0.0,
-                "xq": 0, "xf": 0.0, "xa": 0.0, "fills": 0, "entradas": 0, "salida": "", "p0": None, "q0": 0}
+                "pico": 0.0, "x0": None, "fills": 0, "entradas": 0, "salida": "", "p0": None, "q0": 0,
+                "lotes": [], "b0": 0.0, "ba": 0.0, "esc": []}
+
+    def anotar(tr, t, tipo, q, px):
+        # Escalera del trade. Une ejecuciones seguidas del mismo tipo (una orden partida en varios fills).
+        pos = abs(tr["pos"])
+        d0 = round((px - tr["p0"]) * tr["dir"], 2)
+        u = tr["esc"][-1] if tr["esc"] else None
+        if u and u[1] == tipo and t - u[0] <= 1000:
+            u[3] = round((u[3] * u[2] + px * q) / (u[2] + q), 4)
+            u[2] += q
+            u[4] = pos
+            u[5] = round((u[3] - tr["p0"]) * tr["dir"], 2)
+        else:
+            tr["esc"].append([t, tipo, q, px, pos, d0])
 
     def cerrar(tr, t):
-        com = comisiones.get(tr["sym"], comisiones.get("otro", 0)) * (tr["qe"] + tr["qs"])
+        por_lado = comisiones.get(tr["sym"], comisiones.get("otro", 0))
+        com = por_lado * (tr["qe"] + tr["qs"])
         pe, ps = tr["ve"] / tr["qe"], tr["vs"] / tr["qs"]
         d = tr["dir"]
-        # Excursión máxima a favor / en contra, en puntos (ponderada por contrato si hubo escalado).
-        mfe = tr["xf"] / tr["xq"] if tr["xq"] else None
-        mae = tr["xa"] / tr["xq"] if tr["xq"] else None
+        # MFE/MAE de la idea: lo que hizo el precio desde la primera entrada hasta la salida.
+        mfe = mae = None
+        if tr["x0"]:
+            hi, lo = tr["x0"]
+            mfe = max(0.0, (hi - tr["p0"]) if d > 0 else (tr["p0"] - lo))
+            mae = max(0.0, (tr["p0"] - lo) if d > 0 else (hi - tr["p0"]))
         riesgo = riesgo_inicial(tr)
         trades.append({
             "c": tr["cuenta"], "s": tr["sym"], "d": d, "t0": tr["t0"], "t1": t,
-            "q": tr["maxpos"], "qt": tr["qe"], "pe": round(pe, 4), "ps": round(ps, 4),
-            "pts": round((ps - pe) * d, 4), "pv": tr["pv"],
+            "q": tr["maxpos"], "qt": tr["qe"], "q0": tr["q0"], "p0": tr["p0"],
+            "pe": round(pe, 4), "ps": round(ps, 4), "pts": round((ps - pe) * d, 4),
+            "pts0": round((ps - tr["p0"]) * d, 4), "pv": tr["pv"],
             "bruto": round(tr["bruto"], 2), "com": round(com, 2), "neto": round(tr["bruto"] - com, 2),
+            "b0": round(tr["b0"], 2), "ba": round(tr["ba"], 2), "c0": round(por_lado * tr["q0"] * 2, 2),
             "mfe": None if mfe is None else round(mfe, 4), "mae": None if mae is None else round(mae, 4),
+            "pico": round(tr["pico"], 2),
             "riesgo": riesgo, "fills": tr["fills"], "ent": tr["entradas"], "sal": tipo_salida(tr["salida"]),
+            "esc": tr["esc"],
         })
 
     def riesgo_inicial(tr):
@@ -177,29 +199,47 @@ def armar_trades(ejecuciones, stops, comisiones):
                 abiertos[clave] = tr
             tr["fills"] += 1
             if tr["pos"] == 0 or (tr["pos"] > 0) == (lado > 0):
+                inicial = tr["p0"] is None or t - tr["t0"] <= 1000
                 if tr["p0"] is None:
-                    tr["p0"], tr["q0"] = px, q
-                elif t - tr["t0"] <= 1000:
+                    tr["p0"] = px
+                    if precio_valido(hi) and precio_valido(lo):
+                        tr["x0"] = (hi, lo)
+                if inicial:
                     tr["q0"] += q
+                    tipo = 0
+                else:
+                    tipo = 1 if (px - tr["costo"]) * lado > 0 else 2  # agrega ganando / perdiendo
                 tr["entradas"] += 1
                 tr["costo"] = (tr["costo"] * abs(tr["pos"]) + px * q) / (abs(tr["pos"]) + q)
                 tr["qe"] += q
                 tr["ve"] += px * q
                 tr["pos"] += q * lado
                 tr["maxpos"] = max(tr["maxpos"], abs(tr["pos"]))
+                tr["lotes"].append([q, px, inicial])
                 if precio_valido(hi) and precio_valido(lo):
-                    fav, adv = (hi - px, px - lo) if lado > 0 else (px - lo, hi - px)
-                    tr["xq"] += q
-                    tr["xf"] += max(0.0, fav) * q
-                    tr["xa"] += max(0.0, adv) * q
+                    # Cota de la ganancia abierta máxima (para estimar el trailing drawdown).
+                    tr["pico"] += max(0.0, (hi - px) if lado > 0 else (px - lo)) * q * pv
+                anotar(tr, t, tipo, q, px)
                 q = 0
             else:
                 n = min(q, abs(tr["pos"]))
                 tr["bruto"] += (px - tr["costo"]) * n * pv * tr["dir"]
+                # Reparto FIFO: los primeros contratos en entrar son los primeros en salir.
+                resto = n
+                while resto:
+                    lote = tr["lotes"][0]
+                    m = min(resto, lote[0])
+                    r = (px - lote[1]) * m * pv * tr["dir"]
+                    tr["b0" if lote[2] else "ba"] += r
+                    lote[0] -= m
+                    resto -= m
+                    if not lote[0]:
+                        tr["lotes"].pop(0)
                 tr["qs"] += n
                 tr["vs"] += px * n
                 tr["pos"] += n * lado
                 tr["salida"] = nombre or ""
+                anotar(tr, t, 3, n, px)
                 q -= n
                 if tr["pos"] == 0:
                     cerrar(tr, t)

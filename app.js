@@ -10,6 +10,7 @@ const fmtNum = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximu
 const fmtEnt = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 const fmtFechaET = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
 const fmtHora = new Intl.DateTimeFormat('es-CO', { timeZone: ZONA, hour: '2-digit', minute: '2-digit', hour12: false });
+const fmtHoraSeg = new Intl.DateTimeFormat('es-CO', { timeZone: ZONA, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 const fmtHoraNum = new Intl.DateTimeFormat('en-US', { timeZone: ZONA, hour: 'numeric', hour12: false });
 const fmtFechaCorta = new Intl.DateTimeFormat('es-CO', { timeZone: ZONA, day: 'numeric', month: 'short' });
 const fmtFechaLarga = new Intl.DateTimeFormat('es-CO', { timeZone: ZONA, weekday: 'long', day: 'numeric', month: 'long' });
@@ -165,12 +166,19 @@ function preparar() {
     t.id = i;
     t.dia = diaTrading(t.t0);
     t.r = t.riesgo && t.riesgo.usd > 0 ? t.neto / t.riesgo.usd : null;
-    t.captura = t.mfe > 0 ? t.pts / t.mfe : null;
+    t.p0 = t.p0 ?? t.pe;
+    t.pts0 = t.pts0 ?? t.pts;
+    t.q0 = t.q0 || t.q;
+    t.esc = t.esc || [];
+    t.captura = t.mfe > 0 ? t.pts0 / t.mfe : null;
+    t.addsFavor = t.esc.filter((r) => r[1] === 1).length;
+    t.addsContra = t.esc.filter((r) => r[1] === 2).length;
+    t.escalado = t.addsFavor + t.addsContra > 0;
     (porCuenta[t.c] = porCuenta[t.c] || []).push(t);
   });
   // Señales de comportamiento, calculadas dentro de cada cuenta.
   Object.values(porCuenta).forEach((lista) => {
-    const medQ = mediana(lista.map((t) => t.q)) || 1;
+    const medQ = mediana(lista.map((t) => t.q0)) || 1;
     const porDia = {};
     lista.forEach((t, i) => {
       const prev = lista[i - 1];
@@ -179,7 +187,8 @@ function preparar() {
       t.trasPerdida = !!(prev && prev.neto < 0 && t.t0 - prev.t1 < 10 * MIN && prev.dia === t.dia);
       if (t.trasPerdida) t.senales.push(['Tras pérdida', 'Entró ' + duracion(t.t0 - prev.t1) + ' después de cerrar una pérdida']);
       if (!t.riesgo) t.senales.push(['Sin stop', 'No se registró stop al entrar']);
-      if (t.q >= medQ * 2 && t.q > 1) t.senales.push(['Tamaño ×' + (t.q / medQ).toFixed(1).replace('.0', ''), 'Usó ' + t.q + ' contratos; lo normal en esta cuenta es ' + medQ]);
+      // El tamaño se mide en la entrada inicial; agregar contratos después se analiza en "Escalado".
+      if (t.q0 >= medQ * 2 && t.q0 > 1) t.senales.push(['Entrada ×' + (t.q0 / medQ).toFixed(1).replace('.0', ''), 'Entró con ' + t.q0 + ' contratos; lo normal en esta cuenta es ' + medQ]);
       if (t.r != null && t.r < -1.15) t.senales.push(['Pérdida > 1R', 'Perdió ' + Math.abs(t.r).toFixed(1) + ' veces el riesgo inicial']);
     });
   });
@@ -245,7 +254,7 @@ function estadoCuenta(c) {
   let k = 0;
   ts.forEach((t) => {
     while (k < ri.length && ri[k].dia <= t.dia) bal -= ri[k++].monto;
-    if (t.mfe != null) pico = Math.max(pico, bal + t.mfe * t.pv * t.q - t.com);
+    if (t.pico != null) pico = Math.max(pico, bal + t.pico - t.com);
     bal += t.neto;
     pico = Math.max(pico, bal);
   });
@@ -286,6 +295,7 @@ function render() {
   renderEquity(ts);
   renderCalendario();
   renderDisciplina(ts);
+  renderEscalado(ts);
   const horas = agrupar(ts, (t) => Number(fmtHoraNum.format(new Date(t.t0))) % 24, (h) => h + 'h');
   // Se muestran todas las horas del rango, aunque alguna no tenga trades.
   if (horas.length) for (let h = horas[0].k + 1; h < horas[horas.length - 1].k; h++) if (!horas.some((x) => x.k === h)) horas.push({ k: h, neto: 0, n: 0, gan: 0, label: h + 'h' });
@@ -596,19 +606,19 @@ function renderDisciplina(ts) {
   const m = metricas(ts);
   const ganadores = ts.filter((t) => t.neto > 0 && t.captura != null);
   const cap = mediana(ganadores.map((t) => t.captura));
-  const dejado = suma(ganadores, (t) => Math.max(0, t.mfe - t.pts) * t.pv * t.q);
+  const dejado = ganadores.length ? suma(ganadores, (t) => Math.max(0, t.mfe - t.pts0)) / ganadores.length : 0;
   const sinStop = ts.filter((t) => !t.riesgo);
   const tras = ts.filter((t) => t.trasPerdida);
   const mt = metricas(tras);
   const primeros = ts.filter((t) => t.nDia <= 3), resto = ts.filter((t) => t.nDia > 3);
-  const grandes = ts.filter((t) => t.senales.some((s) => s[0].startsWith('Tamaño')));
+  const grandes = ts.filter((t) => t.senales.some((s) => s[0].startsWith('Entrada ×')));
   const perdR = ts.filter((t) => t.neto < 0 && t.r != null);
   const rPerd = perdR.length ? suma(perdR, (t) => t.r) / perdR.length : null;
   const masDe1R = perdR.filter((t) => t.r < -1.15).length;
 
   cont.innerHTML = [
     disc('Captura de los ganadores', pct(cap),
-      ganadores.length ? `De lo que el precio llegó a darte, te quedaste con la mitad o menos en ${ganadores.filter((t) => t.captura <= 0.5).length} de ${ganadores.length} ganadores. Quedó en la mesa ≈ ${usd0(dejado).replace('+', '')}.` : 'Sin ganadores en el periodo.'),
+      ganadores.length ? `De lo que el precio llegó a darte, te quedaste con la mitad o menos en ${ganadores.filter((t) => t.captura <= 0.5).length} de ${ganadores.length} ganadores. En promedio dejaste ${fmtNum.format(dejado)} pts por ganador.` : 'Sin ganadores en el periodo.'),
     disc('Trades sin stop inicial', sinStop.length + ' de ' + ts.length,
       sinStop.length ? 'Resultado de esos trades: <span class="' + clase(suma(sinStop, (t) => t.neto)) + '">' + usd(suma(sinStop, (t) => t.neto)) + '</span>' : 'Todos entraron con stop.', sinStop.length ? 'aviso' : 'gana'),
     disc('Después de una pérdida (&lt;10 min)', tras.length ? pct(mt.wr) + ' acierto' : '—',
@@ -617,8 +627,36 @@ function renderDisciplina(ts) {
       resto.length ? `${resto.length} trades después del tercero del día, con ${pct(metricas(resto).wr)} de acierto.` : 'Nunca pasaste de 3 trades en un día.'),
     disc('Pérdida promedio en R', rPerd == null ? '—' : rPerd.toFixed(2) + 'R',
       perdR.length ? `${masDe1R} de ${perdR.length} perdedores con stop superaron 1R (stop movido o deslizamiento).` : 'Sin perdedores con stop registrado.', masDe1R ? 'aviso' : ''),
-    disc('Trades con tamaño ×2 o más', grandes.length ? String(grandes.length) : '0',
-      grandes.length ? 'Resultado: <span class="' + clase(suma(grandes, (t) => t.neto)) + '">' + usd(suma(grandes, (t) => t.neto)) + '</span> frente a tu tamaño habitual.' : 'Tamaño consistente.'),
+    disc('Entradas iniciales ×2 o más', grandes.length ? String(grandes.length) : '0',
+      grandes.length ? 'Resultado: <span class="' + clase(suma(grandes, (t) => t.neto)) + '">' + usd(suma(grandes, (t) => t.neto)) + '</span> frente a tu tamaño habitual.' : 'Tamaño inicial consistente.'),
+  ].join('');
+}
+
+function renderEscalado(ts) {
+  const cont = $('#escalado');
+  if (!ts.length) { cont.innerHTML = '<div class="disc"><div class="vacio-msg">Sin trades en este periodo.</div></div>'; return; }
+  const esc = ts.filter((t) => t.escalado), sin = ts.filter((t) => !t.escalado);
+  if (!esc.length) { cont.innerHTML = '<div class="disc" style="grid-column:1/-1"><div class="vacio-msg">No escalaste ningún trade en este periodo.</div></div>'; return; }
+  const prom = (a, f) => (a.length ? suma(a, f) / a.length : null);
+  const adds = esc.flatMap((t) => t.esc.filter((r) => r[1] === 1 || r[1] === 2));
+  const favor = adds.filter((r) => r[1] === 1).length;
+  const netoIni = suma(esc, (t) => t.b0 - t.c0), netoAdd = suma(esc, (t) => t.ba - (t.com - t.c0));
+  const me = metricas(esc), ms_ = metricas(sin);
+  const volteados = esc.filter((t) => t.addsFavor && t.neto < 0);
+  const addsPerdieron = esc.filter((t) => t.ba - (t.com - t.c0) < 0);
+  cont.innerHTML = [
+    disc('Trades escalados', esc.length + ' de ' + ts.length,
+      `Empiezas en promedio con ${prom(esc, (t) => t.q0).toFixed(1)} contratos y llegas a ${prom(esc, (t) => t.q).toFixed(1)}.`),
+    disc('Cuándo agregas', favor + ' ganando / ' + (adds.length - favor) + ' perdiendo',
+      `En promedio agregas cuando el precio va ${pts(prom(adds, (r) => r[5]))} pts desde tu primera entrada.`, adds.length - favor ? 'aviso' : ''),
+    disc('Inicial vs agregado', usd0(netoIni) + ' / ' + usd0(netoAdd),
+      'Resultado neto de tus primeros contratos frente al de los que sumaste después.'),
+    disc('Escalados vs sin escalar', usd0(me.exp) + ' / ' + (sin.length ? usd0(ms_.exp) : '—'),
+      `Promedio por trade · acierto ${pct(me.wr)} vs ${sin.length ? pct(ms_.wr) : '—'}.`),
+    disc('Ganancia que terminó en pérdida', String(volteados.length),
+      volteados.length ? `Agregaste estando en ganancia y el trade cerró perdiendo: <span class="pierde">${usd(suma(volteados, (t) => t.neto))}</span>.` : 'Ningún trade escalado se volteó a pérdida.', volteados.length ? 'aviso' : 'gana'),
+    disc('Agregados que perdieron', addsPerdieron.length + ' de ' + esc.length,
+      'Trades escalados en los que los contratos agregados terminaron en pérdida.'),
   ].join('');
 }
 
@@ -661,7 +699,7 @@ function renderTrades(ts) {
       <td>${fmtHora.format(new Date(t.t0))}</td>
       ${variasCuentas ? `<td><i class="punto" style="background:${c && c.color ? `var(${c.color})` : 'var(--muted)'}"></i> ${esc(c ? c.alias : t.c)}</td>` : ''}
       <td>${t.d > 0 ? 'Long' : 'Short'}</td>
-      <td class="n">${t.q}</td>
+      <td class="n">${t.escalado ? t.q0 + '→' + t.q : t.q}</td>
       <td class="n">${fmtNum.format(t.pe)}</td>
       <td class="n">${fmtNum.format(t.ps)}</td>
       <td class="n">${duracion(t.t1 - t.t0)}</td>
@@ -689,16 +727,24 @@ function detalle(t) {
   l.push(`<div><b>${t.d > 0 ? 'Long' : 'Short'} ${t.q} ${t.s}</b> en ${esc(c ? c.alias : t.c)} · ${fmtHora.format(new Date(t.t0))} → ${fmtHora.format(new Date(t.t1))} (${duracion(t.t1 - t.t0)})</div>`);
   l.push(`<div>Entrada promedio <b>${fmtNum.format(t.pe)}</b> → salida promedio <b>${fmtNum.format(t.ps)}</b> = <span class="${clase(t.pts)}">${pts(t.pts)} pts</span>. Bruto ${usd(t.bruto)}, comisión est. ${usd(t.com, false)}, neto <b class="${clase(t.neto)}">${usd(t.neto)}</b>.</div>`);
   if (t.mfe != null) {
-    let s = `A favor llegó a <b>+${fmtNum.format(t.mfe)} pts</b>`;
-    if (t.mfe > 0 && t.pts > 0) s += `; capturaste el <b>${pct(t.captura)}</b> del movimiento (quedaron ${fmtNum.format(Math.max(0, t.mfe - t.pts))} pts en la mesa)`;
-    else if (t.mfe > 0 && t.pts <= 0) s += ', pero terminó en pérdida';
-    s += `. En contra llegó a <b>−${fmtNum.format(t.mae)} pts</b>.`;
-    if (t.ent > 1) s += ' <span class="muted">(Valores promedio por contrato porque hubo escalado.)</span>';
+    let s = `Desde tu primera entrada (${fmtNum.format(t.p0)}) el precio llegó a <b>+${fmtNum.format(t.mfe)} pts</b> a favor y <b>−${fmtNum.format(t.mae)} pts</b> en contra.`;
+    if (t.mfe > 0 && t.pts0 > 0) s += ` Saliste a ${pts(t.pts0)} pts de esa entrada: capturaste el <b>${pct(t.captura)}</b> del movimiento.`;
+    else if (t.mfe > 0) s += ' Terminó por debajo de tu primera entrada.';
     l.push(`<div>${s}</div>`);
   }
   if (t.riesgo) l.push(`<div>Stop inicial a <b>${fmtNum.format(t.riesgo.pts)} pts</b> (${usd(-t.riesgo.usd, false).replace('−', '')} de riesgo). Resultado: <b class="${clase(t.r)}">${(t.r > 0 ? '+' : '') + t.r.toFixed(2)}R</b>.</div>`);
   else l.push('<div class="aviso">No se encontró un stop colocado al momento de entrar.</div>');
-  if (t.ent > 1) l.push(`<div>Escalado: ${t.ent} entradas, ${t.qt} contratos en total, posición máxima ${t.q}.</div>`);
+  if (t.escalado) {
+    const cAdd = t.com - t.c0;
+    l.push(`<div>Escalado: empezaste con <b>${t.q0}</b> y llegaste a <b>${t.q}</b> contratos (${t.addsFavor} veces agregando ganando${t.addsContra ? `, ${t.addsContra} perdiendo` : ''}).
+      Posición inicial: <b class="${clase(t.b0 - t.c0)}">${usd(t.b0 - t.c0)}</b> · contratos agregados: <b class="${clase(t.ba - cAdd)}">${usd(t.ba - cAdd)}</b>${t.riesgo ? ` · la idea inicial sola dio <b>${((t.b0 - t.c0) / t.riesgo.usd > 0 ? '+' : '') + ((t.b0 - t.c0) / t.riesgo.usd).toFixed(2)}R</b>` : ''}.</div>`);
+  }
+  if (t.esc.length > 2) {
+    const accion = ['Entrada inicial', 'Agrega ganando', 'Agrega perdiendo', 'Salida'];
+    l.push(`<table class="mini-tabla escalera"><thead><tr><th>Hora</th><th>Acción</th><th class="n">Contratos</th><th class="n">Precio</th><th class="n">Posición</th><th class="n">Pts desde 1ª entrada</th></tr></thead><tbody>${
+      t.esc.map((r) => `<tr><td>${fmtHoraSeg.format(new Date(r[0]))}</td><td class="${r[1] === 2 ? 'aviso' : ''}">${accion[r[1]]}</td><td class="n">${r[1] === 3 ? '−' : '+'}${r[2]}</td><td class="n">${fmtNum.format(r[3])}</td><td class="n">${r[4]}</td><td class="n ${r[1] ? clase(r[5]) : ''}">${r[1] ? pts(r[5]) : '—'}</td></tr>`).join('')
+    }</tbody></table>`);
+  }
   l.push(`<div>Cierre: ${t.sal === 'Stop' ? 'por stop' : t.sal === 'Target' ? 'por objetivo (target)' : 'manual'} · ${t.fills} ejecuciones · trade #${t.nDia} del día en esta cuenta.</div>`);
   t.senales.forEach((s) => l.push(`<div><span class="senal">${esc(s[0])}</span> ${esc(s[1])}.</div>`));
   return `<div class="det">${l.join('')}</div>`;
