@@ -82,6 +82,27 @@
       <div id="escalado" class="disciplina"></div>
     </section>
 
+    <section>
+      <h2>Calculadora de agregados <span class="muted small">(cuántos contratos puedes sumar sin arriesgar lo ganado)</span></h2>
+      <div class="calc">
+        <form id="calc" class="calc-campos" autocomplete="off">
+          <label>Instrumento
+            <select id="c-inst">
+              <option value="2">MNQ · $2 por punto</option>
+              <option value="5">MES · $5 por punto</option>
+              <option value="20">NQ · $20 por punto</option>
+              <option value="50">ES · $50 por punto</option>
+            </select>
+          </label>
+          <label>Ganancia abierta en $ (P&amp;L no realizado)<input id="c-gan" type="number" inputmode="decimal" min="0" step="any"></label>
+          <label>Contratos abiertos<input id="c-cont" type="number" inputmode="numeric" min="1" step="1"></label>
+          <label>Stop de toda la posición, a cuántos pts del precio<input id="c-stop" type="number" inputmode="decimal" min="1" step="any"></label>
+          <label>Ganancia que quieres asegurar en $<input id="c-aseg" type="number" inputmode="decimal" min="0" step="any"></label>
+        </form>
+        <div id="calc-res" class="calc-res" aria-live="polite"></div>
+      </div>
+    </section>
+
     <section class="dos-col">
       <div>
         <h2>Por hora de entrada <span class="muted small">(hora Colombia)</span></h2>

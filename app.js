@@ -750,6 +750,56 @@ function detalle(t) {
   return `<div class="det">${l.join('')}</div>`;
 }
 
+/* ---------- Calculadora de agregados ---------- */
+// Colchón = ganancia abierta / (valor del punto × contratos). Con el stop de toda la posición a R pts del precio,
+// lo que queda asegurado es ganancia − valor del punto × R × contratos totales.
+const CALC_LS = 'dt.calc';
+const CALC_CAMPOS = { inst: '#c-inst', gan: '#c-gan', cont: '#c-cont', stop: '#c-stop', aseg: '#c-aseg' };
+function iniciarCalculadora() {
+  let v = { inst: '2', gan: 200, cont: 1, stop: 25, aseg: 0 };
+  try { v = { ...v, ...JSON.parse(leerLS(CALC_LS) || '{}') }; } catch { /* valores por defecto */ }
+  for (const [k, s] of Object.entries(CALC_CAMPOS)) $(s).value = v[k];
+  $('#calc').addEventListener('input', () => {
+    guardarLS(CALC_LS, JSON.stringify(Object.fromEntries(Object.entries(CALC_CAMPOS).map(([k, s]) => [k, $(s).value]))));
+    renderCalculadora();
+  });
+  $('#calc').addEventListener('submit', (e) => e.preventDefault());
+  renderCalculadora();
+}
+function renderCalculadora() {
+  const num = (s) => parseFloat($(s).value);
+  const pv = num('#c-inst'), g = num('#c-gan'), n = Math.round(num('#c-cont')), r = num('#c-stop'), a = Math.max(0, num('#c-aseg') || 0);
+  const res = $('#calc-res');
+  if (!(g > 0) || !(n >= 1) || !(r > 0) || !(pv > 0)) {
+    res.innerHTML = '<div class="vacio-msg">Escribe tu ganancia abierta, los contratos que tienes y a cuántos puntos pondrás el stop.</div>';
+    return;
+  }
+  const porCont = pv * r;
+  const maxTot = Math.max(0, Math.floor((g - a) / porCont + 1e-9));
+  const k = Math.max(0, maxTot - n);
+  const asegura = (tot) => g - porCont * tot;
+  const c = (x) => x + (x === 1 ? ' contrato' : ' contratos');
+  let cab;
+  if (k > 0) {
+    cab = `<div class="et">Puedes agregar hasta</div><div class="grande gana">${c(k)}</div>
+      <div class="sub">Quedarías con ${maxTot} en total. Con el stop a ${fmtNum.format(r)} pts necesitas ${usd(porCont, false)} de ganancia abierta por cada contrato${a ? ', además de los ' + usd(a, false) + ' que quieres asegurar' : ''}.</div>`;
+  } else {
+    const falta = porCont * (n + 1) + a - g;
+    cab = `<div class="et">${maxTot < n ? 'Ya tienes más contratos de los que cubre tu ganancia' : 'Todavía no agregues'}</div><div class="grande aviso">0 contratos</div>
+      <div class="sub">Si el stop te saca ahora, te quedas con <span class="${clase(asegura(n))}">${usd(asegura(n))}</span>. Para agregar uno más te faltan ${usd(falta, false)} de ganancia abierta.</div>`;
+  }
+  const ks = [...new Set([0, 1, 2, Math.round(k / 2), k - 1, k, k + 1, k + 2])].filter((x) => x >= 0).sort((x, y) => x - y);
+  const filas = ks.map((x) => {
+    const tot = n + x, as = asegura(tot);
+    const cls = tot > maxTot ? 'excede' : x === k && k > 0 ? 'max' : '';
+    return `<tr class="${cls}"><td>${x ? '+' + x : 'No agregar'}${tot > maxTot ? ' <span class="senal">excede</span>' : ''}</td><td class="n">${tot}</td>
+      <td class="n">${fmtNum.format(g / (pv * tot))} pts</td><td class="n ${clase(as)}">${usd(as)}</td></tr>`;
+  }).join('');
+  res.innerHTML = cab + `<table class="mini-tabla"><thead><tr><th>Si agregas</th><th class="n">Total</th><th class="n">Colchón</th><th class="n">Si toca el stop</th></tr></thead><tbody>${filas}</tbody></table>
+    <p class="nota muted small">Colchón: lo que el precio puede devolverse antes de que toda la posición quede en cero. Supone que agregas al precio actual y que mueves el stop de todos los contratos. No incluye comisiones.</p>`;
+}
+iniciarCalculadora();
+
 let tResize;
 addEventListener('resize', () => { clearTimeout(tResize); tResize = setTimeout(() => { if (S.d && !$('#app').hidden) render(); }, 150); });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (!leerLS('dt.tema')) { aplicarTema(null); if (S.d) render(); } });
