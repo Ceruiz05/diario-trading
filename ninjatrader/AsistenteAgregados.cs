@@ -29,7 +29,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 		private static readonly Brush CPierde = Pincel(240, 110, 110);
 		private static readonly Brush CAviso = Pincel(250, 178, 25);
 		private static readonly Brush CFondo = Pincel(12, 12, 12);
-		private static readonly string[] Cabecera = { "Cuenta", "Posición", "Ganancia", "Si te saca tu stop", "Agregar", "Stop de todo", "Aseguras" };
+		private static readonly string[] Cabecera = { "Cuenta", "Posición", "Ganancia", "Si te saca tu stop", "Agregar", "Stop de todo", "Te quedas con" };
 
 		private double ultimoPrecio;
 		private System.Windows.Threading.DispatcherTimer timer;
@@ -168,7 +168,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 				}
 				else if (k == 0)
 				{
-					f.Celdas[4] = maxTot < n ? "no · ya te pasaste" : "no · faltan " + Usd(porCont * (n + 1) + Asegurar - g, false);
+					f.Celdas[4] = maxTot < n ? "no · ya tienes de más" : "no · faltan " + Usd(porCont * (n + 1) + Asegurar - g, false);
 					f.Colores[4] = CAviso;
 				}
 				else
@@ -228,7 +228,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 				string pie = filas.Count == 0
 					? "Asistente de agregados · sin posiciones abiertas en " + Instrument.FullName + (string.IsNullOrWhiteSpace(FiltroCuentas) ? "" : " (filtro: " + FiltroCuentas.Trim() + ")")
 					: "Stop a " + Num(DistanciaStop) + " pts · " + Usd(Instrument.MasterInstrument.PointValue * DistanciaStop, false) + " de ganancia por contrato"
-						+ (Asegurar > 0 ? " + " + Usd(Asegurar, false) + " asegurados" : "") + " · Aseguras = si agregas el máximo";
+						+ (Asegurar > 0 ? " + " + Usd(Asegurar, false) + " que no quieres devolver" : "") + " · Te quedas con = si agregas el máximo y el precio vuelve al stop";
 				SharpDX.DirectWrite.TextLayout lPie = Medir(pie, fNormal);
 
 				// Ancho de cada columna según su contenido más largo.
@@ -354,7 +354,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 		public double DistanciaStop { get; set; }
 
 		[Range(0, double.MaxValue)]
-		[Display(Name = "Ganancia a asegurar ($)", Description = "Lo mínimo que quieres llevarte en cada cuenta si el precio se devuelve hasta el stop.", Order = 3, GroupName = "Asistente")]
+		[Display(Name = "Ganancia que no quieres devolver ($)", Description = "Si el precio se devuelve hasta el stop, el asistente cuida que te quedes al menos con esto en cada cuenta. Empieza con 0.", Order = 3, GroupName = "Asistente")]
 		public double Asegurar { get; set; }
 
 		[Display(Name = "Ubicación de la tabla", Order = 4, GroupName = "Asistente")]
