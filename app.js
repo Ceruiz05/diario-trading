@@ -756,7 +756,7 @@ function detalle(t) {
 const CALC_LS = 'dt.calc';
 const CALC_CAMPOS = { inst: '#c-inst', gan: '#c-gan', cont: '#c-cont', stop: '#c-stop', aseg: '#c-aseg' };
 function iniciarCalculadora() {
-  let v = { inst: '2', gan: 200, cont: 1, stop: 25, aseg: 0 };
+  let v = { inst: '2', gan: 200, cont: 1, stop: 40, aseg: 100 };
   try { v = { ...v, ...JSON.parse(leerLS(CALC_LS) || '{}') }; } catch { /* valores por defecto */ }
   for (const [k, s] of Object.entries(CALC_CAMPOS)) $(s).value = v[k];
   $('#calc').addEventListener('input', () => {

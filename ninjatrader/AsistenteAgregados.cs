@@ -53,8 +53,11 @@ namespace NinjaTrader.NinjaScript.Indicators
 			public int Cantidad;
 			public int Dir;
 			public double Sugerido;
+			public double SugeridoAntes;
 			public double Fijo;
 			public bool FijoEsMinimo;
+			public DateTime Abierta;
+			public DateTime UltimoAgregado;
 		}
 
 		protected override void OnStateChange()
@@ -71,8 +74,8 @@ namespace NinjaTrader.NinjaScript.Indicators
 				PaintPriceMarkers			= false;
 				IsSuspendedWhileInactive	= false;
 				FiltroCuentas				= string.Empty;
-				DistanciaStop				= 25;
-				Asegurar					= 0;
+				DistanciaStop				= 40;
+				Asegurar					= 100;
 				Ubicacion					= TextPosition.TopLeft;
 				TamanoLetra					= 12;
 				MostrarLineas				= true;
@@ -202,28 +205,39 @@ namespace NinjaTrader.NinjaScript.Indicators
 				// sugiriera, se marca el mínimo para no devolver la ganancia elegida (con 0, tu nuevo promedio).
 				vistas.Add(a.Name);
 				Seguimiento sg;
+				DateTime ahora = DateTime.Now;
 				if (!seguimiento.TryGetValue(a.Name, out sg) || sg.Dir != dir)
 				{
-					sg = new Seguimiento { Cantidad = n, Dir = dir };
+					sg = new Seguimiento { Cantidad = n, Dir = dir, Abierta = ahora };
 					seguimiento[a.Name] = sg;
 				}
-				if (n > sg.Cantidad)
+				// Una orden puede llenarse en varias partes: lo que entra en los primeros 3 segundos es la entrada
+				// inicial, y las partes que llegan dentro de 3 segundos de un agregado son ese mismo agregado.
+				if (n > sg.Cantidad && (ahora - sg.Abierta).TotalSeconds > 3)
 				{
-					sg.FijoEsMinimo = sg.Sugerido <= 0;
-					sg.Fijo = sg.FijoEsMinimo ? Instrument.MasterInstrument.RoundToTickSize(prom + dir * Asegurar / (n * pv)) : sg.Sugerido;
+					if ((ahora - sg.UltimoAgregado).TotalSeconds > 3)
+						sg.SugeridoAntes = sg.Sugerido;
+					sg.UltimoAgregado = ahora;
+					sg.FijoEsMinimo = sg.SugeridoAntes <= 0;
+					sg.Fijo = sg.FijoEsMinimo ? Instrument.MasterInstrument.RoundToTickSize(prom + dir * Asegurar / (n * pv)) : sg.SugeridoAntes;
 				}
 				sg.Cantidad = n;
 				sg.Sugerido = f.LineaStop;
 				if (sg.Fijo > 0)
 				{
-					f.LineaFija = sg.Fijo;
-					f.FijaEsMinimo = sg.FijoEsMinimo;
-					f.Contratos = n;
+					// Un stop solo sirve del lado de la pérdida: si el precio no ha dejado colchón, no se marca.
+					bool posible = (precio - sg.Fijo) * dir >= TickSize;
 					f.FijaCumplida = cubiertos >= n && (peorStop - sg.Fijo) * dir >= -TickSize / 2;
+					if (posible)
+					{
+						f.LineaFija = sg.Fijo;
+						f.FijaEsMinimo = sg.FijoEsMinimo;
+						f.Contratos = n;
+					}
 					if (k == 0)
 					{
-						f.Celdas[5] = Precio(sg.Fijo) + (f.FijaCumplida ? " OK" : " mueve");
-						f.Colores[5] = f.FijaCumplida ? CGana : CAviso;
+						f.Celdas[5] = !posible ? "sin colchón" : Precio(sg.Fijo) + (f.FijaCumplida ? " OK" : " mueve");
+						f.Colores[5] = posible && f.FijaCumplida ? CGana : CAviso;
 					}
 				}
 				totalG += g;
