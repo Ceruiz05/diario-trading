@@ -33,6 +33,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
 		private double ultimoPrecio;
 		private System.Windows.Threading.DispatcherTimer timer;
+		private readonly Dictionary<string, Seguimiento> seguimiento = new Dictionary<string, Seguimiento>();
 
 		private class Fila
 		{
@@ -40,6 +41,20 @@ namespace NinjaTrader.NinjaScript.Indicators
 			public Brush[] Colores;
 			public double LineaStop;
 			public string Alias;
+			public double LineaFija;
+			public bool FijaCumplida;
+			public bool FijaEsMinimo;
+			public int Contratos;
+		}
+
+		// Lo que se recuerda de cada cuenta entre un dibujo y otro, para detectar cuándo agregaste contratos.
+		private class Seguimiento
+		{
+			public int Cantidad;
+			public int Dir;
+			public double Sugerido;
+			public double Fijo;
+			public bool FijoEsMinimo;
 		}
 
 		protected override void OnStateChange()
@@ -98,6 +113,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
 			double totalG = 0, totalStop = 0;
 			bool todosConStop = true;
+			HashSet<string> vistas = new HashSet<string>();
 			foreach (Account a in cuentas)
 			{
 				if (!string.IsNullOrWhiteSpace(FiltroCuentas) && a.Name.IndexOf(FiltroCuentas.Trim(), StringComparison.OrdinalIgnoreCase) < 0)
@@ -126,7 +142,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
 				// Stops de salida trabajando para esta posición y cuánto queda si se ejecutan.
 				int cubiertos = 0;
-				double resultado = 0, precioStop = 0;
+				double resultado = 0, precioStop = 0, peorStop = 0;
 				lock (a.Orders)
 				{
 					foreach (Order o in a.Orders)
@@ -144,6 +160,8 @@ namespace NinjaTrader.NinjaScript.Indicators
 						cubiertos += q;
 						resultado += (o.StopPrice - prom) * dir * q * pv;
 						precioStop = o.StopPrice;
+						if (peorStop == 0 || (o.StopPrice - peorStop) * dir < 0)
+							peorStop = o.StopPrice;
 					}
 				}
 				if (cubiertos == 0)
@@ -179,9 +197,41 @@ namespace NinjaTrader.NinjaScript.Indicators
 					f.Celdas[5] = Precio(f.LineaStop);
 					f.Celdas[6] = Usd(g - porCont * maxTot);
 				}
+
+				// Al agregar, queda marcado el stop que el asistente sugería justo antes. Si agregaste sin que lo
+				// sugiriera, se marca el mínimo para no devolver la ganancia elegida (con 0, tu nuevo promedio).
+				vistas.Add(a.Name);
+				Seguimiento sg;
+				if (!seguimiento.TryGetValue(a.Name, out sg) || sg.Dir != dir)
+				{
+					sg = new Seguimiento { Cantidad = n, Dir = dir };
+					seguimiento[a.Name] = sg;
+				}
+				if (n > sg.Cantidad)
+				{
+					sg.FijoEsMinimo = sg.Sugerido <= 0;
+					sg.Fijo = sg.FijoEsMinimo ? Instrument.MasterInstrument.RoundToTickSize(prom + dir * Asegurar / (n * pv)) : sg.Sugerido;
+				}
+				sg.Cantidad = n;
+				sg.Sugerido = f.LineaStop;
+				if (sg.Fijo > 0)
+				{
+					f.LineaFija = sg.Fijo;
+					f.FijaEsMinimo = sg.FijoEsMinimo;
+					f.Contratos = n;
+					f.FijaCumplida = cubiertos >= n && (peorStop - sg.Fijo) * dir >= -TickSize / 2;
+					if (k == 0)
+					{
+						f.Celdas[5] = Precio(sg.Fijo) + (f.FijaCumplida ? " OK" : " mueve");
+						f.Colores[5] = f.FijaCumplida ? CGana : CAviso;
+					}
+				}
 				totalG += g;
 				filas.Add(f);
 			}
+
+			foreach (string c in seguimiento.Keys.Where(c => !vistas.Contains(c)).ToList())
+				seguimiento.Remove(c);
 
 			if (filas.Count > 1)
 			{
@@ -295,21 +345,32 @@ namespace NinjaTrader.NinjaScript.Indicators
 					List<float> etiquetas = new List<float>();
 					SharpDX.Direct2D1.AntialiasMode modo = RenderTarget.AntialiasMode;
 					RenderTarget.AntialiasMode = SharpDX.Direct2D1.AntialiasMode.Aliased;
-					foreach (Fila f in filas.Where(f => f.LineaStop > 0))
+					Action<double, string, Brush, bool> Linea = (precio, texto, color, punteada) =>
 					{
-						float yl = chartScale.GetYByValue(f.LineaStop);
+						float yl = chartScale.GetYByValue(precio);
 						if (yl < ChartPanel.Y || yl > ChartPanel.Y + ChartPanel.H)
-							continue;
-						RenderTarget.DrawLine(new SharpDX.Vector2(ChartPanel.X, yl), new SharpDX.Vector2(ChartPanel.X + ChartPanel.W, yl), DX(CGana), 1.5f, guion);
-						SharpDX.DirectWrite.TextLayout le = Medir(f.Alias + " · stop si agregas " + f.Celdas[5], fNormal);
+							return;
+						if (punteada)
+							RenderTarget.DrawLine(new SharpDX.Vector2(ChartPanel.X, yl), new SharpDX.Vector2(ChartPanel.X + ChartPanel.W, yl), DX(color), 1.5f, guion);
+						else
+							RenderTarget.DrawLine(new SharpDX.Vector2(ChartPanel.X, yl), new SharpDX.Vector2(ChartPanel.X + ChartPanel.W, yl), DX(color), 2f);
+						SharpDX.DirectWrite.TextLayout le = Medir(texto, fNormal);
 						float ye = yl - altoFila;
 						while (etiquetas.Any(e => Math.Abs(e - ye) < altoFila))
 							ye -= altoFila;
 						etiquetas.Add(ye);
 						float xe = ChartPanel.X + ChartPanel.W - le.Metrics.Width - 12;
 						RenderTarget.FillRectangle(new SharpDX.RectangleF(xe - 4, ye, le.Metrics.Width + 8, altoFila - 2), fondo);
-						RenderTarget.DrawTextLayout(new SharpDX.Vector2(xe, ye + 1), le, DX(CGana));
-					}
+						RenderTarget.DrawTextLayout(new SharpDX.Vector2(xe, ye + 1), le, DX(color));
+					};
+					// Línea fija: el stop que quedó marcado al agregar. Naranja hasta que tu stop cubra todo y esté ahí o mejor.
+					foreach (Fila f in filas.Where(f => f.LineaFija > 0))
+						Linea(f.LineaFija, f.Alias + (f.FijaCumplida ? " · stop OK en " + Precio(f.LineaFija)
+							: (f.FijaEsMinimo ? " · mínimo: mueve tu stop a " : " · mueve tu stop a ") + Precio(f.LineaFija) + " (los " + f.Contratos + " contratos)"),
+							f.FijaCumplida ? CGana : CAviso, false);
+					// Línea punteada: dónde iría el stop de todo si agregas ahora.
+					foreach (Fila f in filas.Where(f => f.LineaStop > 0))
+						Linea(f.LineaStop, f.Alias + " · stop si agregas " + Precio(f.LineaStop), CGana, true);
 					RenderTarget.AntialiasMode = modo;
 				}
 			}
